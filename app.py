@@ -72,18 +72,44 @@ if uploaded_file is not None:
             if 'Template' in data and 'AppData' in data['Template'] and 'DataActions' in data['Template']['AppData']:
                 raw_actions = data['Template']['AppData']['DataActions']
                 for act in raw_actions:
-                    # Extract Prominence from ActionDefinition/ActionSettings if available
+                    # Extract Prominence
                     prominence = ""
-                    if act.get("ActionDefinition"):
-                        prominence = act["ActionDefinition"].get("Prominence", "")
+                    action_def = act.get("ActionDefinition", {})
+                    if action_def:
+                        prominence = action_def.get("Prominence", "")
                     
+                    # Derive "Do This" description
+                    do_this = ""
+                    atype = act.get("ActionType", "")
+                    
+                    if atype == "SetValues" and "ColumnValues" in action_def:
+                        cols = [cv['Column'] for cv in action_def.get('ColumnValues', [])]
+                        do_this = f"Set columns: {', '.join(cols)}"
+                    elif atype == "AddRow" and "TableDestination" in action_def:
+                        do_this = f"Add row to: {action_def['TableDestination']}"
+                    elif atype == "App" and "AppMenuItemTarget" in action_def:
+                        do_this = f"Go to: {action_def.get('AppMenuItemTarget','')}"
+                    elif atype == "OpenUrl" and "UrlTarget" in action_def:
+                        do_this = f"Open URL: {action_def.get('UrlTarget','')}"
+                    elif atype == "Delete":
+                        do_this = "Delete this row"
+                    else:
+                        # Fallback: try to find 'target' like keys
+                        keys = list(action_def.keys())
+                        relevant = [k for k in keys if 'Target' in k or 'Destination' in k or 'Values' in k]
+                        if relevant:
+                            do_this = f"Config: {', '.join(relevant)}"
+                        else:
+                            do_this = atype # Default to type if no specific info
+
                     actions_list.append({
                         "Action Name": act.get("Name", ""),
+                        "Do This": do_this,
                         "Type": act.get("ActionType", ""),
+                        "Formula": act.get("Condition", "") or "TRUE", # Default TRUE if empty
                         "Table": act.get("Table", ""),
-                        "Display Name": act.get("DisplayName", "") or act.get("Name", ""), # Fallback
+                        "Display Name": act.get("DisplayName", "") or act.get("Name", ""),
                         "Prominence": prominence,
-                        "Condition": act.get("Condition", ""),
                         "Icon": act.get("Icon", "")
                     })
             df_actions = pd.DataFrame(actions_list)
@@ -99,19 +125,24 @@ if uploaded_file is not None:
                 st.subheader("Actions Overview")
                 
                 if not df_actions.empty:
+                    # Show specific columns
+                    cols_to_show = ["Action Name", "Do This", "Formula", "Type", "Table", "Prominence"]
+                    
                     # Filter by Table
                     unique_tables = sorted(df_actions['Table'].dropna().unique().tolist())
                     unique_tables.insert(0, "All Tables")
                     
                     selected_action_table = st.selectbox("Filter Actions by Table:", unique_tables, key="action_filter")
                     
+                    final_df = df_actions
                     if selected_action_table != "All Tables":
-                        filtered_df = df_actions[df_actions['Table'] == selected_action_table]
-                        st.write(f"Showing {len(filtered_df)} actions for table **{selected_action_table}**")
-                        st.dataframe(filtered_df, use_container_width=True)
+                        final_df = df_actions[df_actions['Table'] == selected_action_table]
+                        st.write(f"Showing {len(final_df)} actions for table **{selected_action_table}**")
                     else:
                         st.write(f"Showing all {len(df_actions)} actions")
-                        st.dataframe(df_actions, use_container_width=True)
+                    
+                    # Display with specific columns
+                    st.dataframe(final_df[cols_to_show], use_container_width=True)
                 else:
                     st.info("No actions found.")
 
