@@ -6,7 +6,7 @@ import io
 st.set_page_config(page_title="AppSheet JSON to XLSX Converter", layout="wide")
 
 st.title("AppSheet JSON to Excel Converter")
-st.write("tolong upload json appsheet anda menjadi untuk melihat data tabel nya")
+st.write("tolong upload json appsheet anda untuk melihat data tabel nya")
 
 uploaded_file = st.file_uploader("Choose a JSON file", type="json")
 
