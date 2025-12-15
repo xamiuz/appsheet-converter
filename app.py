@@ -96,9 +96,22 @@ if uploaded_file is not None:
                 st.dataframe(df_tables, use_container_width=True)
             
             with tab_actions:
-                st.subheader(f"All Actions ({len(actions_list)})")
+                st.subheader("Actions Overview")
+                
                 if not df_actions.empty:
-                    st.dataframe(df_actions, use_container_width=True)
+                    # Filter by Table
+                    unique_tables = sorted(df_actions['Table'].dropna().unique().tolist())
+                    unique_tables.insert(0, "All Tables")
+                    
+                    selected_action_table = st.selectbox("Filter Actions by Table:", unique_tables, key="action_filter")
+                    
+                    if selected_action_table != "All Tables":
+                        filtered_df = df_actions[df_actions['Table'] == selected_action_table]
+                        st.write(f"Showing {len(filtered_df)} actions for table **{selected_action_table}**")
+                        st.dataframe(filtered_df, use_container_width=True)
+                    else:
+                        st.write(f"Showing all {len(df_actions)} actions")
+                        st.dataframe(df_actions, use_container_width=True)
                 else:
                     st.info("No actions found.")
 
