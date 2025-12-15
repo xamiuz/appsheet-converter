@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.json
+*.xlsx
+*.pdf
+*.docx
+*.png
+*.csv
+!spekjson.json
+!spekjson_tables.xlsx
+debug_*.py
+debug_*.txt
+.env
