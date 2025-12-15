@@ -60,19 +60,48 @@ if uploaded_file is not None:
             # Create DataFrame for Tables
             df_tables = pd.DataFrame(table_list)
             
-            # --- TABS LAYOUT ---
-            tab_overview, tab_details = st.tabs(["Tables Overview", "Table Column Details"])
             
-            with tab_overview:
-                st.subheader(f"All Tables ({len(tables)})")
-                st.dataframe(df_tables, use_container_width=True)
-            
-            # Prepare Schema Dict for both Details View and Excel Export
+            # Prepare Schema Dict
             schema_dict = {}
             if 'Template' in data and 'AppData' in data['Template'] and 'DataSchemas' in data['Template']['AppData']:
                 schemas = data['Template']['AppData']['DataSchemas']
                 schema_dict = {schema['Name']: schema for schema in schemas}
             
+            # --- PARSE ACTIONS ---
+            actions_list = []
+            if 'Template' in data and 'AppData' in data['Template'] and 'DataActions' in data['Template']['AppData']:
+                raw_actions = data['Template']['AppData']['DataActions']
+                for act in raw_actions:
+                    # Extract Prominence from ActionDefinition/ActionSettings if available
+                    prominence = ""
+                    if act.get("ActionDefinition"):
+                        prominence = act["ActionDefinition"].get("Prominence", "")
+                    
+                    actions_list.append({
+                        "Action Name": act.get("Name", ""),
+                        "Type": act.get("ActionType", ""),
+                        "Table": act.get("Table", ""),
+                        "Display Name": act.get("DisplayName", "") or act.get("Name", ""), # Fallback
+                        "Prominence": prominence,
+                        "Condition": act.get("Condition", ""),
+                        "Icon": act.get("Icon", "")
+                    })
+            df_actions = pd.DataFrame(actions_list)
+
+            # --- TABS LAYOUT ---
+            tab_overview, tab_details, tab_actions = st.tabs(["Tables Overview", "Table Column Details", "Actions Overview"])
+            
+            with tab_overview:
+                st.subheader(f"All Tables ({len(tables)})")
+                st.dataframe(df_tables, use_container_width=True)
+            
+            with tab_actions:
+                st.subheader(f"All Actions ({len(actions_list)})")
+                if not df_actions.empty:
+                    st.dataframe(df_actions, use_container_width=True)
+                else:
+                    st.info("No actions found.")
+
             with tab_details:
                 st.subheader("Inspect Table Schema")
                 selected_table_name = st.selectbox("Select a Table to View Columns:", df_tables['Table Name'].tolist())
@@ -81,6 +110,8 @@ if uploaded_file is not None:
                     selected_row = df_tables[df_tables['Table Name'] == selected_table_name].iloc[0]
                     schema_key = selected_row['Schema Name']
                     
+                    # 1. SHOW COLUMNS
+                    st.markdown("##### Columns")
                     if schema_key and schema_key in schema_dict:
                         schema_data = schema_dict[schema_key]
                         if 'Attributes' in schema_data:
@@ -111,6 +142,19 @@ if uploaded_file is not None:
                             st.warning("No column attributes found in schema.")
                     else:
                         st.warning(f"Schema '{schema_key}' not found.")
+                    
+                    # 2. SHOW ACTIONS FOR THIS TABLE
+                    st.markdown("##### Actions for this Table")
+                    if not df_actions.empty:
+                        # Filter actions where 'Table' matches selected_table_name
+                        # Note: Table in actions might be Name or source, assuming Name matches Table Name
+                        filtered_actions = df_actions[df_actions['Table'] == selected_table_name]
+                        if not filtered_actions.empty:
+                            st.dataframe(filtered_actions, use_container_width=True)
+                        else:
+                            st.info(f"No actions associated with table '{selected_table_name}'.")
+                    else:
+                        st.info("No actions data available.")
 
             # --- Excel Conversion (Background) ---
             output = io.BytesIO()
