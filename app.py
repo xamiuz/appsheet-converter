@@ -106,11 +106,14 @@ if uploaded_file is not None:
                         "Action Name": act.get("Name", ""),
                         "Do This": do_this,
                         "Type": act.get("ActionType", ""),
-                        "Formula": act.get("Condition", "") or "TRUE", # Default TRUE if empty
+                        "Formula": act.get("Condition", "") or "TRUE",
                         "Table": act.get("Table", ""),
                         "Display Name": act.get("DisplayName", "") or act.get("Name", ""),
                         "Prominence": prominence,
-                        "Icon": act.get("Icon", "")
+                        "Need Confirmation": action_def.get("NeedsConfirmation", False),
+                        "Confirmation Msg": action_def.get("ConfirmationMessage", ""),
+                        "Icon": act.get("Icon", ""),
+                        "Modifies Data": action_def.get("ModifiesData", "")
                     })
             df_actions = pd.DataFrame(actions_list)
 
@@ -125,8 +128,12 @@ if uploaded_file is not None:
                 st.subheader("Actions Overview")
                 
                 if not df_actions.empty:
-                    # Show specific columns
-                    cols_to_show = ["Action Name", "Do This", "Formula", "Type", "Table", "Prominence"]
+                    # Show specific columns - now including EVERYTHING
+                    cols_to_show = [
+                        "Action Name", "Do This", "Formula", "Type", "Table", 
+                        "Need Confirmation", "Confirmation Msg", 
+                        "Prominence", "Display Name", "Icon", "Modifies Data"
+                    ]
                     
                     # Filter by Table
                     unique_tables = sorted(df_actions['Table'].dropna().unique().tolist())
