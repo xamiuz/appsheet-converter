@@ -6,7 +6,7 @@ import io
 st.set_page_config(page_title="AppSheet JSON to XLSX Converter", layout="wide")
 
 st.title("AppSheet JSON to Excel Converter")
-st.write("Upload your `spekjson.json` file to extract table definitions into an Excel file.")
+st.write("tolong upload json appsheet anda menjadi untuk melihat data tabel nya")
 
 uploaded_file = st.file_uploader("Choose a JSON file", type="json")
 
