@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import pandas as pd
 import io
+import ast
 
 st.set_page_config(page_title="AppSheet JSON to XLSX Converter", layout="wide")
 
@@ -41,13 +42,27 @@ if uploaded_file is not None:
             tables = data['Template']['AppData']['DataSets']
         
         if tables:
+            # --- PARSE SLICES FIRST ---
+            slice_names = set()
+            if 'Template' in data and 'AppData' in data['Template'] and 'TableSlices' in data['Template']['AppData']:
+                raw_slices = data['Template']['AppData']['TableSlices']
+                for sl in raw_slices:
+                    slice_names.add(sl.get("Name", ""))
+
             # Extract data
             table_list = []
             for table in tables:
+                t_name = table.get("Name", "")
+                t_type = table.get("TableType", "") or table.get("Type", "") or "Data Table"
+                
+                # Check if it is a slice
+                if t_name in slice_names:
+                     t_type = "Slice"
+
                 table_info = {
-                    "Table Name": table.get("Name", ""),
+                    "Table Name": t_name,
                     "Description": table.get("Description", "") or table.get("Comment", ""), # Fallback to Comment
-                    "Type": table.get("TableType", "") or table.get("Type", "") or "Data Table",
+                    "Type": t_type,
                     "Schema Name": table.get("Schema", "") or table.get("SchemaName", ""),
                     "Source": table.get("Source", ""),
                     "SourcePath": table.get("SourcePath", ""),
@@ -117,8 +132,109 @@ if uploaded_file is not None:
                     })
             df_actions = pd.DataFrame(actions_list)
 
+            # --- PARSE SLICES ---
+            slices_list = []
+            if 'Template' in data and 'AppData' in data['Template'] and 'TableSlices' in data['Template']['AppData']:
+                raw_slices = data['Template']['AppData']['TableSlices']
+                for sl in raw_slices:
+                    # Extract filter formula from possible keys
+                    filter_formula = sl.get("RowFilterCondition", "")
+                    if not filter_formula:
+                         filter_formula = sl.get("FilterCondition", "")
+                    if not filter_formula:
+                         filter_formula = sl.get("FilterExpression", "")
+
+                    slices_list.append({
+                        "Slice Name": sl.get("Name", ""),
+                        "Source Table": sl.get("SourceTable", ""),
+                        "Filter Formula": filter_formula,
+                        "Update Mode": sl.get("UpdateMode", ""),
+                        "Slice Columns": str(sl.get("SliceColumns", [])), # Note: JSON shows 'Columns', not 'SliceColumns'? Check structure.
+                        # Wait, inspection said: 'Columns' in keys. My code uses 'SliceColumns'. 
+                        # Let's fix Columns as well if I see it in Step 311. 
+                        # Step 311 keys: ..., 'Columns', ... 
+                        # My code used 'SliceColumns', that looks wrong too.
+                        "Slice Columns": str(sl.get("Columns", [])),
+                        "Actions": str(sl.get("Actions", [])) # output says 'Actions', not 'SliceActions'
+                    })
+            df_slices = pd.DataFrame(slices_list)
+
+            # --- PARSE VIEWS (ROBUST) ---
+            views_list = []
+            
+            # Helper to check if an item looks like a view
+            def is_view(item):
+                if not isinstance(item, dict): return False
+                # User's snippet showed TableOrFolderName, ViewDefinition
+                keys = item.keys()
+                return ('Name' in keys and 'ViewDefinition' in keys) or \
+                       ('Name' in keys and 'TableOrFolderName' in keys) or \
+                       ('ViewName' in keys and 'ViewDefinition' in keys) or \
+                       ('ViewType' in keys)
+
+            raw_views = []
+            
+            # 1. Try Standard Locations
+            if 'Template' in data and 'Presentation' in data['Template']:
+                pres = data['Template']['Presentation']
+                if 'Views' in pres:
+                     raw_views.extend(pres['Views'])
+                if 'ViewEntries' in pres: # Found in debug
+                     raw_views.extend(pres['ViewEntries'])
+                
+                # 2. Brute force lists in Presentation
+                for k, v in pres.items():
+                    if k not in ['Views', 'ViewEntries'] and isinstance(v, list) and len(v) > 0:
+                        if is_view(v[0]):
+                             raw_views.extend(v)
+            
+            # 3. Try Template['Views'] (Legacy)
+            if 'Template' in data and 'Views' in data['Template']:
+                 raw_views.extend(data['Template']['Views'])
+
+            for v in raw_views:
+                # Extract Source Table
+                source = v.get("Source", "")
+                if not source: source = v.get("TableOrFolderName", "") # From user snippet
+                if not source: source = v.get("ForTable", "")
+                if not source: source = v.get("Table", "")
+                
+                # Extract Type
+                v_type = v.get("ViewType", "") or v.get("Type", "")
+                if not v_type:
+                    # Fallback 1: 'Action' often holds the type (e.g. 'table', 'deck')
+                    v_type = v.get("Action", "")
+                
+                if not v_type and "ViewDefinition" in v:
+                     # Fallback 2: Check ViewDefinition for hints
+                     vd = v["ViewDefinition"] or {}
+                     if isinstance(vd, dict):
+                         if "FormStyle" in vd: v_type = "Form"
+                         elif "MapStyle" in vd: v_type = "Map"
+                         elif "ChartType" in vd: v_type = "Chart"
+                         elif "CalendarStyle" in vd: v_type = "Calendar"
+                         elif "DashboardStyle" in vd: v_type = "Dashboard"
+                         elif "GalleryStyle" in vd: v_type = "Gallery"
+                
+                # Extract Display Name
+                
+                # Extract Display Name
+                d_name = v.get("DisplayName", "") or v.get("Name", "") or v.get("ViewName", "")
+
+                views_list.append({
+                    "View Name": v.get("Name", "") or v.get("ViewName", ""),
+                    "Type": v_type,
+                    "Source": source,
+                    "Display Name": d_name,
+                    "Show If": v.get("ShowIf", ""),
+                    "Position": v.get("Position", "") or (v.get("MenuSpec", {}).get("MenuPosition", "") if isinstance(v.get("MenuSpec"), dict) else ""),
+                    "Order By": str(v.get("ViewStyle", {}).get("SortDefinitions", "")) if isinstance(v.get("ViewStyle"), dict) else "",
+                    "Group By": str(v.get("ViewStyle", {}).get("GroupDefinitions", "")) if isinstance(v.get("ViewStyle"), dict) else "",
+                    "Definition": str(v.get("ViewDefinition", "")) # Add raw definition for debug/info
+                })
+            df_views = pd.DataFrame(views_list)
             # --- TABS LAYOUT ---
-            tab_overview, tab_details, tab_actions = st.tabs(["Tables Overview", "Table Column Details", "Actions Overview"])
+            tab_overview, tab_details, tab_actions, tab_slices, tab_views = st.tabs(["Tables Overview", "Table Column Details", "Actions Overview", "Slices", "Views"])
             
             with tab_overview:
                 st.subheader(f"All Tables ({len(tables)})")
@@ -206,6 +322,92 @@ if uploaded_file is not None:
                             st.info(f"No actions associated with table '{selected_table_name}'.")
                     else:
                         st.info("No actions data available.")
+
+                    # 3. SHOW SLICES FOR THIS TABLE
+                    st.markdown("##### Slices for this Table")
+                    if not df_slices.empty:
+                        # Filter slices where 'Source Table' matches selected_table_name
+                        filtered_slices = df_slices[df_slices['Source Table'] == selected_table_name]
+                        if not filtered_slices.empty:
+                            st.write(f"Found {len(filtered_slices)} slices:")
+                            for index, row in filtered_slices.iterrows():
+                                with st.expander(f"Slice: {row['Slice Name']}"):
+                                    st.markdown("**Row Filter Condition:**")
+                                    st.code(row['Filter Formula'], language='sql') # Using sql highlight for formula
+                                    
+                                    st.write(f"**Update Mode:** {row['Update Mode']}")
+                                    
+                                    # Parse and display columns
+                                    try:
+                                        cols_str = row['Slice Columns']
+                                        if cols_str:
+                                            cols_list = ast.literal_eval(cols_str)
+                                            if isinstance(cols_list, list) and len(cols_list) > 0:
+                                                st.markdown("**Included Columns:**")
+                                                # Create a clean dataframe for columns
+                                                df_slice_cols = pd.DataFrame(cols_list)
+                                                st.dataframe(df_slice_cols, use_container_width=True)
+                                            else:
+                                                st.info("No specific columns defined (All columns).")
+                                    except:
+                                        st.text(f"Raw Columns: {row['Slice Columns']}")
+                                    
+                                    st.write(f"**Slice Actions:** {row['Actions']}")
+                        else:
+                            st.info(f"No slices associated with table '{selected_table_name}'.")
+                    else:
+                        st.info("No slices data available.")
+
+                    # 4. SHOW VIEWS FOR THIS TABLE
+                    st.markdown("##### Views for this Table")
+                    if not df_views.empty:
+                        # Get matching slices for this table to check if view points to a slice
+                        related_slices = []
+                        if not df_slices.empty:
+                            related_slices = df_slices[df_slices['Source Table'] == selected_table_name]['Slice Name'].tolist()
+                        
+                        # Filter views where 'Source' matches selected_table_name OR matches a related slice
+                        matches_table = df_views['Source'] == selected_table_name
+                        matches_slice = df_views['Source'].isin(related_slices)
+                        
+                        filtered_views = df_views[matches_table | matches_slice]
+                        
+                        if not filtered_views.empty:
+                            st.write(f"Found {len(filtered_views)} views:")
+                            for index, row in filtered_views.iterrows():
+                                source_type = "Table" if row['Source'] == selected_table_name else "Slice"
+                                with st.expander(f"View: {row['View Name']} ({row['Type']}) - Source: {source_type}"):
+                                    st.write(f"**Source:** {row['Source']}")
+                                    st.write(f"**Display Name:** {row['Display Name']}")
+                                    st.write(f"**Show If:** `{row['Show If']}`")
+                                    st.write(f"**Position:** {row['Position']}")
+                                    if row['Order By']:
+                                        st.write(f"**Sort:** '{row['Order By']}'")
+                                    if row['Group By']:
+                                        st.write(f"**Group:** '{row['Group By']}'")
+                        else:
+                            st.info(f"No views associated with table '{selected_table_name}' (or its slices).")
+                    else:
+                        st.info("No views data available.")
+
+
+
+
+            with tab_slices:
+                st.subheader("Slices Overview")
+                if not df_slices.empty:
+                    st.dataframe(df_slices, use_container_width=True)
+                else:
+                    st.info("No slices found.")
+
+            with tab_views:
+                st.subheader("Views Overview")
+                if not df_views.empty:
+                    st.dataframe(df_views, use_container_width=True)
+                else:
+                    st.info("No views found. (Checked Views, ViewEntries, and other lists in Presentation)")
+
+
 
             # --- Excel Conversion (Background) ---
             output = io.BytesIO()
